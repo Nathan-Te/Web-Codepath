@@ -1,4 +1,4 @@
-// Convert blocks to tokens
+// Convert blocks to tokens for the executor
 export const blocksToTokens = (blockList) => {
   return blockList.map(block => {
     switch (block.type) {
@@ -12,12 +12,14 @@ export const blocksToTokens = (blockList) => {
         return { type: 'grab' };
       case 'repeat':
         return { type: 'repeat', count: block.param || 2, body: blocksToTokens(block.children || []) };
-      case 'if_wall':
-        return { type: 'if', condition: 'wall', body: blocksToTokens(block.children || []) };
-      case 'if_no_wall':
-        return { type: 'if', condition: '!wall', body: blocksToTokens(block.children || []) };
-      case 'while_no_wall':
-        return { type: 'while', condition: '!wall', body: blocksToTokens(block.children || []) };
+      case 'if':
+        return block.condition
+          ? { type: 'if', condition: block.condition.type, body: blocksToTokens(block.children || []) }
+          : null;
+      case 'while':
+        return block.condition
+          ? { type: 'while', condition: block.condition.type, body: blocksToTokens(block.children || []) }
+          : null;
       default:
         return null;
     }
