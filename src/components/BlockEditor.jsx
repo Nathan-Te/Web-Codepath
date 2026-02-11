@@ -3,6 +3,8 @@ import { ACTION_BLOCKS, CONTAINER_BLOCKS, CONDITION_BLOCKS, ALL_BLOCKS } from '.
 
 const genUid = () => Date.now() + Math.random();
 
+const DRAG_MIME = 'text/plain';
+
 // Create a new block instance from a definition
 const createBlock = (blockDef) => {
   const block = { type: blockDef.id, uid: genUid() };
@@ -15,14 +17,6 @@ const createBlock = (blockDef) => {
     block.children = [];
   }
   return block;
-};
-
-// Deep clone a block tree
-const cloneBlock = (block) => {
-  const b = { ...block, uid: genUid() };
-  if (b.children) b.children = b.children.map(cloneBlock);
-  if (b.condition) b.condition = { ...b.condition, uid: genUid() };
-  return b;
 };
 
 // Recursively remove a block by uid from a tree, returns [newTree, removedBlock]
@@ -49,11 +43,9 @@ const removeBlockByUid = (blocks, uid) => {
   return [result, removed];
 };
 
-// Insert block at path in tree
-// path = [index] for root, [parentUid, 'children', index] for nested
+// Insert block at index in tree (targetUid=null for root)
 const insertBlockAtPath = (blocks, targetUid, index, block) => {
   if (targetUid === null) {
-    // Insert at root level
     const result = [...blocks];
     result.splice(index, 0, block);
     return result;
@@ -84,15 +76,23 @@ const setConditionOnBlock = (blocks, targetUid, condition) => {
   });
 };
 
+// Encode/decode drag data via text/plain
+const encodeDragData = (data) => JSON.stringify(data);
+const decodeDragData = (e) => {
+  const raw = e.dataTransfer.getData(DRAG_MIME);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+};
+
 // ---- Palette Block (draggable from palette) ----
 function PaletteBlock({ blockDef, category }) {
   const handleDragStart = (e) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({
+    e.dataTransfer.setData(DRAG_MIME, encodeDragData({
       source: 'palette',
       blockId: blockDef.id,
       category,
     }));
-    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.effectAllowed = 'copyMove';
   };
 
   return (
@@ -150,13 +150,10 @@ function ConditionSlot({ condition, parentUid, onDropCondition, onRemoveConditio
     e.preventDefault();
     e.stopPropagation();
     setOver(false);
-    try {
-      const data = JSON.parse(e.dataTransfer.getData('application/json'));
-      if (data.category === 'condition' || data.blockType === 'condition') {
-        const blockId = data.blockId || data.type;
-        onDropCondition(parentUid, { type: blockId, uid: genUid() });
-      }
-    } catch {}
+    const data = decodeDragData(e);
+    if (data && data.category === 'condition') {
+      onDropCondition(parentUid, { type: data.blockId, uid: genUid() });
+    }
   };
 
   const condDef = condition ? ALL_BLOCKS.find(b => b.id === condition.type) : null;
@@ -214,12 +211,12 @@ function WorkspaceBlock({ block, index, parentUid, onDrop, onReorder, onRemove, 
 
   const handleDragStart = (e) => {
     e.stopPropagation();
-    e.dataTransfer.setData('application/json', JSON.stringify({
+    e.dataTransfer.setData(DRAG_MIME, encodeDragData({
       source: 'workspace',
       uid: block.uid,
       parentUid,
     }));
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.effectAllowed = 'copyMove';
     setDragState({ draggingUid: block.uid });
   };
 
@@ -323,7 +320,7 @@ function DropZone({ blocks, parentUid, onDrop, onReorder, onRemove, onParamChang
   const getDropIndex = useCallback((e) => {
     if (!zoneRef.current) return blocks.length;
     const children = Array.from(zoneRef.current.children).filter(
-      c => c.dataset.role === 'block-wrapper'
+      c => c.dataset && c.dataset.role === 'block-wrapper'
     );
     for (let i = 0; i < children.length; i++) {
       const rect = children[i].getBoundingClientRect();
@@ -335,11 +332,7 @@ function DropZone({ blocks, parentUid, onDrop, onReorder, onRemove, onParamChang
   const handleDragOver = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    try {
-      const types = e.dataTransfer.types;
-      if (!types.includes('application/json')) return;
-    } catch {}
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = 'copy';
     setDropIndex(getDropIndex(e));
   };
 
@@ -354,15 +347,14 @@ function DropZone({ blocks, parentUid, onDrop, onReorder, onRemove, onParamChang
     e.stopPropagation();
     const idx = getDropIndex(e);
     setDropIndex(null);
-    try {
-      const data = JSON.parse(e.dataTransfer.getData('application/json'));
-      if (data.category === 'condition') return; // conditions only go in condition slots
-      if (data.source === 'palette') {
-        onDrop(data.blockId, parentUid, idx);
-      } else if (data.source === 'workspace') {
-        onReorder(data.uid, parentUid, idx);
-      }
-    } catch {}
+    const data = decodeDragData(e);
+    if (!data) return;
+    if (data.category === 'condition') return; // conditions only go in condition slots
+    if (data.source === 'palette') {
+      onDrop(data.blockId, parentUid, idx);
+    } else if (data.source === 'workspace') {
+      onReorder(data.uid, parentUid, idx);
+    }
   };
 
   return (
@@ -439,7 +431,7 @@ export default function BlockEditor({ blocks, setBlocks }) {
 
   // Change param on a block
   const handleParamChange = useCallback((uid, value) => {
-    const updateParam = (blocks) => blocks.map(b => {
+    const updateParam = (list) => list.map(b => {
       if (b.uid === uid) return { ...b, param: value };
       if (b.children) return { ...b, children: updateParam(b.children) };
       return b;
