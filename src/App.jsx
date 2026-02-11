@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getDailySeed, generatePuzzle } from './data/puzzles';
 import { tokenize } from './language/tokenizer';
 import { countInstructions, executeTokens } from './engine/executor';
-import { blocksToTokens } from './engine/blocks';
+import { blocksToTokens, tokensToBlocks, blocksToCode } from './engine/blocks';
 
 // Components
 import GameGrid from './components/GameGrid';
@@ -54,6 +54,25 @@ export default function CodePath() {
       }
     }
   }, [seed]);
+
+  // Switch mode and sync code <-> blocks
+  const switchMode = useCallback((newMode) => {
+    if (newMode === mode) return;
+    if (newMode === 'blocks') {
+      // code -> blocks: parse the code text into block objects
+      try {
+        const tokens = tokenize(code);
+        setBlocks(tokensToBlocks(tokens));
+      } catch {
+        // If parsing fails, keep current blocks
+      }
+    } else {
+      // blocks -> code: convert block tree to code text
+      const generated = blocksToCode(blocks);
+      if (generated) setCode(generated);
+    }
+    setMode(newMode);
+  }, [mode, code, blocks]);
 
   // Reset puzzle
   const resetPuzzle = useCallback(() => {
@@ -195,7 +214,7 @@ export default function CodePath() {
           {/* Mode tabs */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <button
-              onClick={() => setMode('code')}
+              onClick={() => switchMode('code')}
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
@@ -210,7 +229,7 @@ export default function CodePath() {
               Code Editor
             </button>
             <button
-              onClick={() => setMode('blocks')}
+              onClick={() => switchMode('blocks')}
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
